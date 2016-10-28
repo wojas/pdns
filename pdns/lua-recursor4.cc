@@ -533,7 +533,8 @@ RecursorLua4::RecursorLua4(const std::string& fname)
   d_lw->registerFunction("set", &DynMetric::set);
   d_lw->registerFunction("get", &DynMetric::get);
   
-  
+  d_lw->writeFunction("kvquery", &GenUDPQueryResponse);
+
   ifstream ifs(fname);
   if(!ifs) {
     throw std::runtime_error("Unable to read configuration file from '"+fname+"': "+strerror(errno));
@@ -553,32 +554,32 @@ RecursorLua4::RecursorLua4(const std::string& fname)
 
 bool RecursorLua4::prerpz(const ComboAddress& remote,const ComboAddress& local, const DNSName& query, const QType& qtype, bool isTcp, vector<DNSRecord>& res, const vector<pair<uint16_t,string> >* ednsOpts, unsigned int tag, int& ret, bool* wantsRPZ, std::unordered_map<std::string,bool>* discardedPolicies)
 {
-  return genhook(d_prerpz, remote, local, query, qtype, isTcp, res, ednsOpts, tag, nullptr, nullptr, ret, nullptr, wantsRPZ, discardedPolicies);
+  return genhook("prerpz", remote, local, query, qtype, isTcp, res, ednsOpts, tag, nullptr, nullptr, ret, nullptr, wantsRPZ, discardedPolicies);
 }
 
 bool RecursorLua4::preresolve(const ComboAddress& remote,const ComboAddress& local, const DNSName& query, const QType& qtype, bool isTcp, vector<DNSRecord>& res, const vector<pair<uint16_t,string> >* ednsOpts, unsigned int tag, DNSFilterEngine::Policy* appliedPolicy, std::vector<std::string>* policyTags, int& ret, bool* variable, bool* wantsRPZ)
 {
-  return genhook(d_preresolve, remote, local, query, qtype, isTcp, res, ednsOpts, tag, appliedPolicy, policyTags, ret, variable, wantsRPZ, nullptr);
+  return genhook("preresolve", remote, local, query, qtype, isTcp, res, ednsOpts, tag, appliedPolicy, policyTags, ret, variable, wantsRPZ, nullptr);
 }
 
 bool RecursorLua4::nxdomain(const ComboAddress& remote,const ComboAddress& local, const DNSName& query, const QType& qtype, bool isTcp, vector<DNSRecord>& res, int& ret, bool* variable)
 {
-  return genhook(d_nxdomain, remote, local, query, qtype, isTcp, res, 0, 0, nullptr, nullptr, ret, variable, 0, nullptr);
+  return genhook("nxdomain", remote, local, query, qtype, isTcp, res, 0, 0, nullptr, nullptr, ret, variable, 0, nullptr);
 }
 
 bool RecursorLua4::nodata(const ComboAddress& remote,const ComboAddress& local, const DNSName& query, const QType& qtype, bool isTcp, vector<DNSRecord>& res, int& ret, bool* variable)
 {
-  return genhook(d_nodata, remote, local, query, qtype, isTcp, res, 0, 0, nullptr, nullptr, ret, variable, 0, nullptr);
+  return genhook("nodata", remote, local, query, qtype, isTcp, res, 0, 0, nullptr, nullptr, ret, variable, 0, nullptr);
 }
 
 bool RecursorLua4::postresolve(const ComboAddress& remote,const ComboAddress& local, const DNSName& query, const QType& qtype, bool isTcp, vector<DNSRecord>& res, DNSFilterEngine::Policy* appliedPolicy, std::vector<std::string>* policyTags, int& ret, bool* variable)
 {
-  return genhook(d_postresolve, remote, local, query, qtype, isTcp, res, 0, 0, appliedPolicy, policyTags, ret, variable, 0, nullptr);
+  return genhook("postresolve", remote, local, query, qtype, isTcp, res, 0, 0, appliedPolicy, policyTags, ret, variable, 0, nullptr);
 }
 
 bool RecursorLua4::preoutquery(const ComboAddress& ns, const ComboAddress& requestor, const DNSName& query, const QType& qtype, bool isTcp, vector<DNSRecord>& res, int& ret)
 {
-  return genhook(d_preoutquery, ns, requestor, query, qtype, isTcp, res, 0, 0, nullptr, nullptr, ret, 0, 0, nullptr);
+  return genhook("preoutquery", ns, requestor, query, qtype, isTcp, res, 0, 0, nullptr, nullptr, ret, 0, 0, nullptr);
 }
 
 bool RecursorLua4::ipfilter(const ComboAddress& remote, const ComboAddress& local, const struct dnsheader& dh)
@@ -606,8 +607,10 @@ int RecursorLua4::gettag(const ComboAddress& remote, const Netmask& ednssubnet, 
   return 0;
 }
 
-bool RecursorLua4::genhook(luacall_t& func, const ComboAddress& remote,const ComboAddress& local, const DNSName& query, const QType& qtype, bool isTcp, vector<DNSRecord>& res, const vector<pair<uint16_t,string> >* ednsOpts, unsigned int tag, DNSFilterEngine::Policy* appliedPolicy, std::vector<std::string>* policyTags, int& ret, bool* variable, bool* wantsRPZ, std::unordered_map<std::string,bool>* discardedPolicies)
+bool RecursorLua4::genhook(const string& funcname, const ComboAddress& remote,const ComboAddress& local, const DNSName& query, const QType& qtype, bool isTcp, vector<DNSRecord>& res, const vector<pair<uint16_t,string> >* ednsOpts, unsigned int tag, DNSFilterEngine::Policy* appliedPolicy, std::vector<std::string>* policyTags, int& ret, bool* variable, bool* wantsRPZ, std::unordered_map<std::string,bool>* discardedPolicies)
 {
+  auto luathread = d_lw->createThread();
+  auto func = d_lw->readVariable<boost::optional<luacall_t>>(luathread, funcname).get_value_or(0);
   if(!func)
     return false;
 

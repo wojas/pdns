@@ -98,7 +98,7 @@ private:
 
   typedef std::function<bool(std::shared_ptr<DNSQuestion>)> luacall_t;
   luacall_t d_prerpz, d_preresolve, d_nxdomain, d_nodata, d_postresolve, d_preoutquery, d_postoutquery;
-  bool genhook(luacall_t& func, const ComboAddress& remote,const ComboAddress& local, const DNSName& query, const QType& qtype, bool isTcp, vector<DNSRecord>& res,  const vector<pair<uint16_t,string> >* ednsOpts, unsigned int tag, DNSFilterEngine::Policy* appliedPolicy, std::vector<std::string>* policyTags, int& ret, bool* variable, bool* wantsRPZ, std::unordered_map<std::string,bool>* discardedPolicies);
+  bool genhook(const string& func, const ComboAddress& remote,const ComboAddress& local, const DNSName& query, const QType& qtype, bool isTcp, vector<DNSRecord>& res,  const vector<pair<uint16_t,string> >* ednsOpts, unsigned int tag, DNSFilterEngine::Policy* appliedPolicy, std::vector<std::string>* policyTags, int& ret, bool* variable, bool* wantsRPZ, std::unordered_map<std::string,bool>* discardedPolicies);
   typedef std::function<bool(ComboAddress,ComboAddress, struct dnsheader)> ipfilter_t;
   ipfilter_t d_ipfilter;
 };
