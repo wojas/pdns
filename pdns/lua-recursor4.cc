@@ -238,9 +238,14 @@ struct DynMetric
   void set(unsigned long val) { *ptr =val; }
 };
 
+
 RecursorLua4::RecursorLua4(const std::string& fname)
 {
+  vector<LuaContext::ThreadID> luathreads;
+
   d_lw = std::unique_ptr<LuaContext>(new LuaContext);
+
+  for(int i=0; i<300000; i++) luathreads.push_back(d_lw->createThread());
 
   d_lw->registerFunction<int(dnsheader::*)()>("getID", [](dnsheader& dh) { return dh.id; });
   d_lw->registerFunction<bool(dnsheader::*)()>("getCD", [](dnsheader& dh) { return dh.cd; });

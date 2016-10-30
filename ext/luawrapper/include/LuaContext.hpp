@@ -53,6 +53,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <boost/variant.hpp>
 #include <boost/type_traits.hpp>
 #include <lua.hpp>
+#include <iostream>
 
 #ifdef _MSC_VER
 #   include "misc/exception.hpp"
@@ -93,6 +94,7 @@ public:
         lua_atpanic(mState, [](lua_State* state) -> int {
             const std::string str = lua_tostring(state, -1);
             lua_pop(state, 1);
+            std::cerr<<str<<std::endl;
             assert(false && "lua_atpanic triggered");
             exit(0);
         });
