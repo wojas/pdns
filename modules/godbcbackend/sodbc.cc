@@ -19,6 +19,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
+#include "pdns/logger.hh"
 #include "pdns/utility.hh"
 #include <sstream>
 #include "sodbc.hh"
@@ -90,6 +91,7 @@ public:
   vector<ODBCParam> d_req_bind;
 
   SSqlStatement* bind(const string& name, ODBCParam& p) {
+    prepareStatement();
     d_req_bind.push_back(p);
     SQLRETURN result = SQLBindParameter(
       d_statement,           // StatementHandle,
@@ -109,15 +111,16 @@ public:
     return this;
   }
 
-  SSqlStatement* bind(const string& name, bool value) { return bind(name, (uint32_t)value); }
+  SSqlStatement* bind(const string& name, bool value) { prepareStatement(); return bind(name, (uint32_t)value); }
 
-  SSqlStatement* bind(const string& name, long value) { return bind(name, (unsigned long)value); }
+  SSqlStatement* bind(const string& name, long value) { prepareStatement(); return bind(name, (unsigned long)value); }
 
-  SSqlStatement* bind(const string& name, int value) { return bind(name, (uint32_t)value); }
+  SSqlStatement* bind(const string& name, int value) { prepareStatement(); return bind(name, (uint32_t)value); }
 
-  SSqlStatement* bind(const string& name, long long value) { return bind(name, (unsigned long long)value); }
+  SSqlStatement* bind(const string& name, long long value) { prepareStatement(); return bind(name, (unsigned long long)value); }
 
   SSqlStatement* bind(const string& name, uint32_t value) {
+    prepareStatement();
     ODBCParam p;
     p.ParameterValuePtr = new UDWORD {value};
     p.LenPtr = new SQLLEN {sizeof(UDWORD)};
@@ -127,6 +130,7 @@ public:
   }
 
   SSqlStatement* bind(const string& name, unsigned long value) {
+    prepareStatement();
     ODBCParam p;
     p.ParameterValuePtr = new ULONG {value};
     p.LenPtr = new SQLLEN {sizeof(ULONG)};
@@ -136,6 +140,7 @@ public:
   }
 
   SSqlStatement* bind(const string& name, unsigned long long value) {
+    prepareStatement();
     ODBCParam p;
     p.ParameterValuePtr = new unsigned long long {value};
     p.LenPtr = new SQLLEN {sizeof(unsigned long long)};
@@ -149,7 +154,7 @@ public:
     // cerr<<"asked to bind string "<<value<<endl;
 
     if(d_req_bind.size() > (d_parnum+1)) throw SSqlException("Trying to bind too many parameters.");
-
+    prepareStatement();
     ODBCParam p;
 
     p.ParameterValuePtr = (char*) new char[value.size()+1];
@@ -166,6 +171,7 @@ public:
   SSqlStatement* bindNull(const string& name) {
     if(d_req_bind.size() > (d_parnum+1)) throw SSqlException("Trying to bind too many parameters.");
 
+    prepareStatement();
     ODBCParam p;
 
     p.ParameterValuePtr = NULL;
@@ -179,10 +185,11 @@ public:
 
   SSqlStatement* execute()
   {
+    prepareStatement();
     SQLRETURN result;
     // cerr<<"execute("<<d_query<<")"<<endl;
     if (d_dolog) {
-      // L<<Logger::Warning<<"Query: "<<d_query<<endl;
+      L<<Logger::Warning<<"Query: "<<d_query<<endl;
     }
 
     result = SQLExecute(d_statement);
@@ -246,7 +253,7 @@ private:
      std::string errorMessage;
      if (!realTestResult(result, type, handle, message, errorMessage)) {
        releaseStatement();
-       throw errorMessage;
+       throw SSqlException(errorMessage);
      }
   }
 
@@ -422,7 +429,7 @@ SODBC::~SODBC( void )
 // Executes a command.
 void SODBC::execute( const std::string & command )
 {
-  SODBCStatement stmt(command, false, 0, m_connection);
+  SODBCStatement stmt(command, m_log, 0, m_connection);
 
   stmt.execute()->reset();
 }
@@ -441,7 +448,7 @@ SSqlException SODBC::sPerrorException( const std::string & reason )
 
 SSqlStatement* SODBC::prepare(const string& query, int nparams)
 {
-  return new SODBCStatement(query, true, nparams, m_connection);
+  return new SODBCStatement(query, m_log, nparams, m_connection);
 }
 
 
@@ -476,5 +483,5 @@ void SODBC::rollback() {
 
 void SODBC::testResult(SQLRETURN result, SQLSMALLINT type, SQLHANDLE handle, const std::string & message) {
   std::string errorMessage;
-  if (!realTestResult(result, type, handle, message, errorMessage)) throw errorMessage;
+  if (!realTestResult(result, type, handle, message, errorMessage)) throw SSqlException(errorMessage);
 }

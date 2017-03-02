@@ -5,7 +5,7 @@ Starting with the PowerDNS Authoritative Server 3.4.0, DNS update support is ava
 * WKS records are specifically mentioned in the RFC, we don't specifically care about WKS records;
 * Anything we forgot....
 
-The implementation requires the backend to support a number of new oparations. Currently, the following backends have been modified to support DNS update:
+The implementation requires the backend to support a number of new operations. Currently, the following backends have been modified to support DNS update:
 
 * [gmysql](backend-generic-mysql.md)
 * [gpgsql](backend-generic-postgresql.md)
@@ -26,7 +26,7 @@ A list of IP ranges that are allowed to perform updates on any domain. The defau
 Tell PowerDNS to forward to the master server if the zone is configured as slave. Masters are determined by the masters field in the domains table. The default behaviour is enabled (yes), which means that it will try to forward. In the processing of the update packet, the **allow-dnsupdate-from** and **TSIG-ALLOW-DNSUPDATE** are processed first, so those permissions apply before the **forward-dnsupdate** is used. It will try all masters that you have configured until one is successful.
 
 ## `lua-dnsupdate-policy-script`
-Use this LUA script containing function `updatepolicy` to validate each update. (since 4.0.0)
+Use this Lua script containing function `updatepolicy` to validate each update. (since 4.0.0)
 This will **TURN OFF** all other authorization methods, and you are expected to take care of everything yourself.
 See [update policy](#update-policy) for details and examples.
 
@@ -206,12 +206,15 @@ This tells PowerDNS to:
 1.  Enable DNS update support([`dnsupdate`](settings.md#dnsupdate))
 2.  Allow updates from NO ip-address ([`allow-dnsupdate-from=`](settings.md#allow-dnsupdate-from))
 
-We just told powerdns (via the configuration file) that we accept updates from nobody via the [`allow-dnsupdate-from`](settings.md#allow-dnsupdate-from) parameter. That's not very useful, so we're going to give permissions per zone, via the domainmetadata table.
+We just told powerdns (via the configuration file) that we accept updates from nobody via the [`allow-dnsupdate-from`](settings.md#allow-dnsupdate-from) parameter. That's not very useful, so we're going to give permissions per zone (including the appropriate reverse zone), via the domainmetadata table.
 
 ```
 sql> select id from domains where name='example.org';
 5
-sql> insert into domainmetadata(domain_id, kind, content) values(5, ‘ALLOW-DNSUPDATE-FROM’,’127.0.0.1’);
+sql> insert into domainmetadata(domain_id, kind, content) values(5, 'ALLOW-DNSUPDATE-FROM','127.0.0.1');
+sql> select id from domains where name='1.168.192.in-addr.arpa';
+6
+sql> insert into domainmetadata(domain_id, kind, content) values(6, 'ALLOW-DNSUPDATE-FROM','127.0.0.1');
 ```
 
 This gives the ip '127.0.0.1' access to send update messages. Make sure you use the ip address of the machine that runs **dhcpd**.
@@ -256,7 +259,7 @@ This is a short description of how DNS update messages are processed by PowerDNS
 
 # Update policy
 
-Since 4.0.0, you can define a Lua script to handle DNS UPDATE message authorization.
+Since 4.1.0, you can define a Lua script to handle DNS UPDATE message authorization.
 The Lua script is to contain at least function called `updatepolicy` which accepts one parameter.
 This parameter is an object, containing all the information for the request.
 To permit change, return true, otherwise return false.

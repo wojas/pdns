@@ -53,15 +53,14 @@ typename C::value_type::second_type constGet(const C& c, const std::string& name
 }
 
 #ifndef HAVE_LUA
-void loadRecursorLuaConfig(const std::string& fname)
+void loadRecursorLuaConfig(const std::string& fname, bool checkOnly)
 {
   if(!fname.empty())
     throw PDNSException("Asked to load a Lua configuration file '"+fname+"' in binary without Lua support");
 }
 #else
 
-
-void loadRecursorLuaConfig(const std::string& fname)
+void loadRecursorLuaConfig(const std::string& fname, bool checkOnly)
 {
   LuaConfigItems lci;
 
@@ -69,10 +68,9 @@ void loadRecursorLuaConfig(const std::string& fname)
   if(fname.empty())
     return;
   ifstream ifs(fname);
-  if(!ifs) {
-    theL()<<"Unable to read configuration file from '"<<fname<<"': "<<strerror(errno)<<endl;
-    return;
-  }
+  if(!ifs)
+    throw PDNSException("Cannot open file '"+fname+"': "+strerror(errno));
+
   Lua.writeFunction("clearSortlist", [&lci]() { lci.sortlist.clear(); });
   
   /* we can get: "1.2.3.4"
@@ -90,10 +88,11 @@ void loadRecursorLuaConfig(const std::string& fname)
   };
   Lua.writeVariable("Policy", pmap);
 
-  Lua.writeFunction("rpzFile", [&lci](const string& fname, const boost::optional<std::unordered_map<string,boost::variant<int, string>>>& options) {
+  Lua.writeFunction("rpzFile", [&lci](const string& filename, const boost::optional<std::unordered_map<string,boost::variant<int, string>>>& options) {
       try {
 	boost::optional<DNSFilterEngine::Policy> defpol;
 	std::string polName("rpzFile");
+	const size_t zoneIdx = lci.dfe.size();
 	if(options) {
 	  auto& have = *options;
 	  if(have.count("policyName")) {
@@ -117,27 +116,30 @@ void loadRecursorLuaConfig(const std::string& fname)
 		defpol->d_ttl = -1; // get it from the zone
 	    }
 	  }
+          if(have.count("zoneSizeHint")) {
+            lci.dfe.reserve(zoneIdx, static_cast<size_t>(boost::get<int>(constGet(have, "zoneSizeHint"))));
+          }
 	}
-        const size_t zoneIdx = lci.dfe.size();
-        theL()<<Logger::Warning<<"Loading RPZ from file '"<<fname<<"'"<<endl;
+        theL()<<Logger::Warning<<"Loading RPZ from file '"<<filename<<"'"<<endl;
         lci.dfe.setPolicyName(zoneIdx, polName);
-        loadRPZFromFile(fname, lci.dfe, defpol, zoneIdx);
-        theL()<<Logger::Warning<<"Done loading RPZ from file '"<<fname<<"'"<<endl;
+        loadRPZFromFile(filename, lci.dfe, defpol, zoneIdx);
+        theL()<<Logger::Warning<<"Done loading RPZ from file '"<<filename<<"'"<<endl;
       }
       catch(std::exception& e) {
-	theL()<<Logger::Error<<"Unable to load RPZ zone from '"<<fname<<"': "<<e.what()<<endl;
+	theL()<<Logger::Error<<"Unable to load RPZ zone from '"<<filename<<"': "<<e.what()<<endl;
       }
     });
 
 
-  Lua.writeFunction("rpzMaster", [&lci](const string& master_, const string& zone_, const boost::optional<std::unordered_map<string,boost::variant<int, string>>>& options) {
+  Lua.writeFunction("rpzMaster", [&lci, checkOnly](const string& master_, const string& zone_, const boost::optional<std::unordered_map<string,boost::variant<int, string>>>& options) {
       try {
 	boost::optional<DNSFilterEngine::Policy> defpol;
         TSIGTriplet tt;
         int refresh=0;
 	std::string polName;
 	size_t maxReceivedXFRMBytes = 0;
-        ComboAddress localAddress;
+	ComboAddress localAddress;
+	const size_t zoneIdx = lci.dfe.size();
 	if(options) {
 	  auto& have = *options;
           polName = zone_;
@@ -162,6 +164,9 @@ void loadRecursorLuaConfig(const std::string& fname)
 		defpol->d_ttl = -1; // get it from the zone
 	    }
 	  }
+          if(have.count("zoneSizeHint")) {
+            lci.dfe.reserve(zoneIdx, static_cast<size_t>(boost::get<int>(constGet(have, "zoneSizeHint"))));
+          }
 	  if(have.count("tsigname")) {
             tt.name=DNSName(toLower(boost::get<string>(constGet(have, "tsigname"))));
             tt.algo=DNSName(toLower(boost::get<string>(constGet(have, "tsigalgo"))));
@@ -183,14 +188,15 @@ void loadRecursorLuaConfig(const std::string& fname)
           // We were passed a localAddress, check if its AF matches the master's
           throw PDNSException("Master address("+master.toString()+") is not of the same Address Family as the local address ("+localAddress.toString()+").");
 	DNSName zone(zone_);
-        const size_t zoneIdx = lci.dfe.size();
         lci.dfe.setPolicyName(zoneIdx, polName);
 
-	auto sr=loadRPZFromServer(master, zone, lci.dfe, defpol, zoneIdx, tt, maxReceivedXFRMBytes * 1024 * 1024, localAddress);
-        if(refresh)
-          sr->d_st.refresh=refresh;
-	std::thread t(RPZIXFRTracker, master, zone, defpol, zoneIdx, tt, sr, maxReceivedXFRMBytes * 1024 * 1024, localAddress);
-	t.detach();
+        if (!checkOnly) {
+          auto sr=loadRPZFromServer(master, zone, lci.dfe, defpol, zoneIdx, tt, maxReceivedXFRMBytes * 1024 * 1024, localAddress);
+          if(refresh)
+            sr->d_st.refresh=refresh;
+          std::thread t(RPZIXFRTracker, master, zone, defpol, zoneIdx, tt, sr, maxReceivedXFRMBytes * 1024 * 1024, localAddress);
+          t.detach();
+        }
       }
       catch(std::exception& e) {
 	theL()<<Logger::Error<<"Unable to load RPZ zone '"<<zone_<<"' from '"<<master_<<"': "<<e.what()<<endl;
@@ -221,8 +227,8 @@ void loadRecursorLuaConfig(const std::string& fname)
 			    }
 			    else {
 			      const auto& v =boost::get<vector<pair<int, string> > >(e.second);
-			      for(const auto& e : v)
-				lci.sortlist.addEntry(formask, Netmask(e.second), order);
+			      for(const auto& entry : v)
+				lci.sortlist.addEntry(formask, Netmask(entry.second), order);
 			    }
 			    ++order;
 			  }
@@ -265,11 +271,14 @@ void loadRecursorLuaConfig(const std::string& fname)
     });
 
 #if HAVE_PROTOBUF
-  Lua.writeFunction("protobufServer", [&lci](const string& server_, const boost::optional<uint16_t> timeout, const boost::optional<uint64_t> maxQueuedEntries, const boost::optional<uint8_t> reconnectWaitTime, const boost::optional<uint8_t> maskV4, boost::optional<uint8_t> maskV6, boost::optional<bool> asyncConnect, boost::optional<bool> taggedOnly) {
+  Lua.writeFunction("protobufServer", [&lci, checkOnly](const string& server_, const boost::optional<uint16_t> timeout, const boost::optional<uint64_t> maxQueuedEntries, const boost::optional<uint8_t> reconnectWaitTime, const boost::optional<uint8_t> maskV4, boost::optional<uint8_t> maskV6, boost::optional<bool> asyncConnect, boost::optional<bool> taggedOnly) {
       try {
 	ComboAddress server(server_);
         if (!lci.protobufServer) {
-          lci.protobufServer = std::make_shared<RemoteLogger>(server, timeout ? *timeout : 2, maxQueuedEntries ? *maxQueuedEntries : 100, reconnectWaitTime ? *reconnectWaitTime : 1, asyncConnect ? *asyncConnect : false);
+          if (!checkOnly) {
+            lci.protobufServer = std::make_shared<RemoteLogger>(server, timeout ? *timeout : 2, maxQueuedEntries ? *maxQueuedEntries : 100, reconnectWaitTime ? *reconnectWaitTime : 1, asyncConnect ? *asyncConnect : false);
+          }
+
           if (maskV4) {
             lci.protobufMaskV4 = *maskV4;
           }
@@ -278,6 +287,26 @@ void loadRecursorLuaConfig(const std::string& fname)
           }
           if (taggedOnly) {
             lci.protobufTaggedOnly = *taggedOnly;
+          }
+        }
+        else {
+          theL()<<Logger::Error<<"Only one protobuf server can be configured, we already have "<<lci.protobufServer->toString()<<endl;
+        }
+      }
+      catch(std::exception& e) {
+	theL()<<Logger::Error<<"Error while starting protobuf logger to '"<<server_<<": "<<e.what()<<endl;
+      }
+      catch(PDNSException& e) {
+        theL()<<Logger::Error<<"Error while starting protobuf logger to '"<<server_<<": "<<e.reason<<endl;
+      }
+    });
+
+  Lua.writeFunction("outgoingProtobufServer", [&lci, checkOnly](const string& server_, const boost::optional<uint16_t> timeout, const boost::optional<uint64_t> maxQueuedEntries, const boost::optional<uint8_t> reconnectWaitTime, boost::optional<bool> asyncConnect) {
+      try {
+	ComboAddress server(server_);
+        if (!lci.outgoingProtobufServer) {
+          if (!checkOnly) {
+            lci.outgoingProtobufServer = std::make_shared<RemoteLogger>(server, timeout ? *timeout : 2, maxQueuedEntries ? *maxQueuedEntries : 100, reconnectWaitTime ? *reconnectWaitTime : 1, asyncConnect ? *asyncConnect : false);
           }
         }
         else {
@@ -301,13 +330,13 @@ void loadRecursorLuaConfig(const std::string& fname)
     theL()<<Logger::Error<<"Unable to load Lua script from '"+fname+"': ";
     try {
       std::rethrow_if_nested(e);
-    } catch(const std::exception& e) {
-      // e is the exception that was thrown from inside the lambda
-      theL() << e.what() << std::endl;      
+    } catch(const std::exception& exp) {
+      // exp is the exception that was thrown from inside the lambda
+      theL() << exp.what() << std::endl;
     }
-    catch(const PDNSException& e) {
-      // e is the exception that was thrown from inside the lambda
-      theL() << e.reason << std::endl;      
+    catch(const PDNSException& exp) {
+      // exp is the exception that was thrown from inside the lambda
+      theL() << exp.reason << std::endl;
     }
     throw;
 
